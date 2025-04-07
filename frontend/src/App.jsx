@@ -12,7 +12,6 @@ function App() {
   const [segments, setSegments] = useState([]);
   const [currentTime, setCurrentTime] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isFocused, setIsFocused] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -80,24 +79,6 @@ function App() {
     setCurrentTime(time);
   };
 
-  const toggleFocus = () => {
-    setIsFocused(!isFocused);
-  };
-
-  const handleRefocus = () => {
-    setIsFocused(true);
-    // Find the current segment and scroll to it
-    const currentSegment = segments.find(
-      segment => currentTime >= segment.startTime && currentTime < segment.endTime
-    );
-    if (currentSegment) {
-      const element = document.getElementById(`segment-${currentSegment.startTime}`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -126,22 +107,6 @@ function App() {
         <div className="flex justify-between items-center p-4">
           <h1 className="text-2xl font-bold">Audio Transcription Navigator</h1>
           <div className="flex items-center space-x-4">
-            <button
-              onClick={toggleFocus}
-              className={`px-4 py-2 rounded ${
-                isFocused ? 'bg-blue-500 text-white' : 'bg-gray-200'
-              }`}
-            >
-              {isFocused ? 'Focused' : 'Unfocused'}
-            </button>
-            {!isFocused && (
-              <button
-                onClick={handleRefocus}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
-              >
-                Re-focus
-              </button>
-            )}
             <label className="cursor-pointer bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
               Upload Audio
               <input
@@ -168,7 +133,6 @@ function App() {
           currentTime={currentTime}
           onSegmentClick={handleSegmentClick}
           searchTerm={searchTerm}
-          isFocused={isFocused}
         />
 
         <AudioPlayer

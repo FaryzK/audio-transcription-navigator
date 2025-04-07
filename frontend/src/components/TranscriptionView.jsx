@@ -1,27 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
 const TranscriptionView = ({ 
   segments, 
   currentTime, 
   onSegmentClick, 
-  searchTerm,
-  isFocused 
+  searchTerm
 }) => {
   const [activeSegment, setActiveSegment] = useState(null);
   const [activeWord, setActiveWord] = useState(null);
-  const [isFollowingPlayback, setIsFollowingPlayback] = useState(true);
-  const containerRef = useRef(null);
 
   // Effect for handling playback-based updates
   useEffect(() => {
-    if (!isFocused || !isFollowingPlayback) return;
-
     const currentSegment = segments.find(
       segment => currentTime >= segment.startTime && currentTime < segment.endTime
     );
 
     if (currentSegment) {
-      // Find the current word within the segment
       const currentWord = currentSegment.words?.find(
         word => currentTime >= word.start && currentTime < word.end
       );
@@ -29,24 +23,14 @@ const TranscriptionView = ({
       if (currentSegment !== activeSegment || currentWord !== activeWord) {
         setActiveSegment(currentSegment);
         setActiveWord(currentWord);
-        
-        // Scroll the active segment into view
-        const element = document.getElementById(`segment-${currentSegment.startTime}`);
-        if (element && containerRef.current) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
       }
     }
-  }, [currentTime, segments, isFocused, activeSegment, activeWord, isFollowingPlayback]);
+  }, [currentTime, segments, activeSegment, activeWord]);
 
   // Handler for manual segment clicks
   const handleSegmentClick = (segment) => {
-    setIsFollowingPlayback(false); // Disable auto-following when manually selecting
     setActiveSegment(segment);
     onSegmentClick(segment.startTime);
-    
-    // Re-enable following playback after a short delay
-    setTimeout(() => setIsFollowingPlayback(true), 1000);
   };
 
   const filteredSegments = searchTerm
@@ -81,7 +65,7 @@ const TranscriptionView = ({
   };
 
   return (
-    <div ref={containerRef} className="transcription-container">
+    <div className="transcription-container">
       {filteredSegments.length === 0 ? (
         <div className="text-center p-8 text-gray-500">
           No matching segments found. Try a different search term.
