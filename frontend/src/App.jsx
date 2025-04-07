@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import AudioPlayer from './components/AudioPlayer';
 import TranscriptionView from './components/TranscriptionView';
@@ -16,7 +16,6 @@ function App() {
   const [error, setError] = useState(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
-  const isAutoScrolling = useRef(false);
 
   useEffect(() => {
     loadDemoData();
@@ -82,13 +81,8 @@ function App() {
   };
 
   const handleManualScroll = () => {
-    if (!isAutoScrolling.current && isFollowing) {
-      console.log('App: Manual scroll detected - switching to exploring mode', {
-        wasFollowing: isFollowing,
-        isAutoScrolling: isAutoScrolling.current
-      });
-      setIsFollowing(false);
-    }
+    console.log('App: Manual scroll detected - switching to exploring mode');
+    setIsFollowing(false);
   };
 
   const enableFollowing = () => {
@@ -97,8 +91,10 @@ function App() {
   };
 
   const handleSearchFocus = () => {
-    console.log('App: Search focused - switching to exploring mode');
-    setIsFollowing(false);
+    if (searchTerm) {
+      console.log('App: Search has text - switching to exploring mode');
+      setIsFollowing(false);
+    }
   };
 
   const handleSearchClear = () => {
@@ -107,11 +103,7 @@ function App() {
   };
 
   const returnToPlayback = () => {
-    console.log('App: Return to playback clicked', {
-      currentTime,
-      isAutoScrolling: isAutoScrolling.current
-    });
-    isAutoScrolling.current = true;
+    console.log('App: Return to playback clicked');
     setIsFollowing(true);
     
     // Find current segment
@@ -191,7 +183,6 @@ function App() {
             searchTerm={searchTerm}
             isFollowing={isFollowing}
             onManualScroll={handleManualScroll}
-            isAutoScrolling={isAutoScrolling}
             onEnableFollowing={enableFollowing}
           />
 

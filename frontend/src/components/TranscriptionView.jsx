@@ -13,59 +13,24 @@ const TranscriptionView = ({
   const [activeSegment, setActiveSegment] = useState(null);
   const [activeWord, setActiveWord] = useState(null);
   const containerRef = useRef(null);
-  const scrollTimeout = useRef(null);
-  const isUserScrolling = useRef(false);
 
-  // Add scroll event listeners
+  // Add wheel event listener
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const handleScroll = () => {
-      console.log('Scroll detected', {
-        isAutoScrolling: isAutoScrolling.current,
-        isUserScrolling: isUserScrolling.current
-      });
-
-      // Clear existing timeout
-      if (scrollTimeout.current) {
-        clearTimeout(scrollTimeout.current);
-      }
-
-      // Reset auto-scrolling flag after scroll ends
-      scrollTimeout.current = setTimeout(() => {
-        console.log('Scroll timeout completed - resetting flags');
-        isAutoScrolling.current = false;
-        isUserScrolling.current = false;
-      }, 150);
-    };
-
-    // Detect when user starts scrolling via wheel
-    const handleWheel = () => {
-      console.log('Wheel event detected');
-      // Immediately stop auto-scrolling and switch to manual mode
-      isAutoScrolling.current = false;
-      isUserScrolling.current = true;
+    // Detect when user starts scrolling via wheel or touch
+    const handleUserInteraction = () => {
+      console.log('User interaction detected - switching to exploring mode');
       onManualScroll?.();
     };
 
-    // Detect when user starts scrolling via touch
-    const handleTouchStart = () => {
-      console.log('Touch start detected');
-      // Immediately stop auto-scrolling and switch to manual mode
-      isAutoScrolling.current = false;
-      isUserScrolling.current = true;
-      onManualScroll?.();
-    };
-
-    container.addEventListener('scroll', handleScroll);
-    container.addEventListener('wheel', handleWheel, { passive: true });
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('wheel', handleUserInteraction, { passive: true });
+    container.addEventListener('touchstart', handleUserInteraction, { passive: true });
 
     return () => {
-      container.removeEventListener('scroll', handleScroll);
-      container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('wheel', handleUserInteraction);
+      container.removeEventListener('touchstart', handleUserInteraction);
     };
   }, [onManualScroll]);
 
@@ -84,25 +49,16 @@ const TranscriptionView = ({
         setActiveSegment(currentSegment);
         setActiveWord(currentWord);
         
-        // Only auto-scroll if following is enabled, no search term, and no user scrolling
-        if (isFollowing && !searchTerm && !isUserScrolling.current) {
+        // Only auto-scroll if following is enabled and no search term
+        if (isFollowing && !searchTerm) {
           console.log('Auto-scrolling to segment', {
             segmentStartTime: currentSegment.startTime,
-            currentTime,
-            isAutoScrolling: isAutoScrolling.current,
-            isUserScrolling: isUserScrolling.current
+            currentTime
           });
-          isAutoScrolling.current = true;
           const element = document.getElementById(`segment-${currentSegment.startTime}`);
           if (element && containerRef.current) {
             element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
-        } else {
-          console.log('Skipping auto-scroll', {
-            isFollowing,
-            hasSearchTerm: !!searchTerm,
-            isUserScrolling: isUserScrolling.current
-          });
         }
       }
     }
@@ -111,8 +67,7 @@ const TranscriptionView = ({
   // Handler for manual segment clicks
   const handleSegmentClick = (segment) => {
     console.log('Segment clicked', {
-      segmentStartTime: segment.startTime,
-      isAutoScrolling: isAutoScrolling.current
+      segmentStartTime: segment.startTime
     });
 
     setActiveSegment(segment);
@@ -122,7 +77,6 @@ const TranscriptionView = ({
     // Ensure clicked segment is visible
     const element = document.getElementById(`segment-${segment.startTime}`);
     if (element && containerRef.current) {
-      isAutoScrolling.current = true; // Prevent this scroll from triggering manual mode
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
