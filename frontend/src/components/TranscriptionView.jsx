@@ -54,8 +54,8 @@ const TranscriptionView = ({
           <span
             key={`${word.start}-${index}`}
             className={`word-segment ${
-              activeWord === word ? 'bg-yellow-300 font-bold' : ''
-            } px-0.5 rounded cursor-pointer hover:bg-yellow-100`}
+              activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
+            } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
             onClick={(e) => {
               e.stopPropagation();
               onSegmentClick(word.start);
