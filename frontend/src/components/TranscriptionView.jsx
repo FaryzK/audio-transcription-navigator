@@ -8,6 +8,7 @@ const TranscriptionView = ({
   isFocused 
 }) => {
   const [activeSegment, setActiveSegment] = useState(null);
+  const [activeWord, setActiveWord] = useState(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -17,22 +18,55 @@ const TranscriptionView = ({
       segment => currentTime >= segment.startTime && currentTime < segment.endTime
     );
 
-    if (currentSegment && currentSegment !== activeSegment) {
-      setActiveSegment(currentSegment);
-      
-      // Scroll the active segment into view
-      const element = document.getElementById(`segment-${currentSegment.startTime}`);
-      if (element && containerRef.current) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (currentSegment) {
+      // Find the current word within the segment
+      const currentWord = currentSegment.words?.find(
+        word => currentTime >= word.start && currentTime < word.end
+      );
+
+      if (currentSegment !== activeSegment || currentWord !== activeWord) {
+        setActiveSegment(currentSegment);
+        setActiveWord(currentWord);
+        
+        // Scroll the active segment into view
+        const element = document.getElementById(`segment-${currentSegment.startTime}`);
+        if (element && containerRef.current) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     }
-  }, [currentTime, segments, isFocused, activeSegment]);
+  }, [currentTime, segments, isFocused, activeSegment, activeWord]);
 
   const filteredSegments = searchTerm
     ? segments.filter(segment => 
         segment.text.toLowerCase().includes(searchTerm.toLowerCase())
       )
     : segments;
+
+  const renderWords = (segment) => {
+    if (!segment.words) {
+      return segment.text;
+    }
+
+    return (
+      <div className="mt-1 text-gray-800 leading-relaxed">
+        {segment.words.map((word, index) => (
+          <span
+            key={`${word.start}-${index}`}
+            className={`word-segment ${
+              activeWord === word ? 'bg-yellow-300 font-bold' : ''
+            } px-0.5 rounded cursor-pointer hover:bg-yellow-100`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSegmentClick(word.start);
+            }}
+          >
+            {word.text}
+          </span>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div ref={containerRef} className="transcription-container">
@@ -45,8 +79,8 @@ const TranscriptionView = ({
           <div
             key={segment.startTime}
             id={`segment-${segment.startTime}`}
-            className={`transcription-segment ${
-              activeSegment === segment ? 'active' : ''
+            className={`transcription-segment p-3 mb-2 rounded-lg transition-all duration-200 ${
+              activeSegment === segment ? 'bg-blue-50 border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'
             }`}
             onClick={() => onSegmentClick(segment.startTime)}
           >
@@ -60,7 +94,7 @@ const TranscriptionView = ({
                 </div>
               )}
             </div>
-            <div className="mt-1 text-gray-800">{segment.text}</div>
+            {renderWords(segment)}
           </div>
         ))
       )}
