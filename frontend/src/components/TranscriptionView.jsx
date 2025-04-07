@@ -1,13 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const TranscriptionView = ({ 
   segments, 
   currentTime, 
   onSegmentClick, 
-  searchTerm
+  searchTerm,
+  isFollowing,
+  onManualScroll,
+  isAutoScrolling
 }) => {
   const [activeSegment, setActiveSegment] = useState(null);
   const [activeWord, setActiveWord] = useState(null);
+  const containerRef = useRef(null);
+  const scrollTimeout = useRef(null);
+
+  // Add scroll event listener
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      // Clear existing timeout
+      if (scrollTimeout.current) {
+        clearTimeout(scrollTimeout.current);
+      }
+
+      // Only trigger manual scroll if it's not an auto-scroll
+      if (!isAutoScrolling.current) {
+        onManualScroll?.();
+      }
+
+      // Reset auto-scrolling flag after scroll ends
+      scrollTimeout.current = setTimeout(() => {
+        isAutoScrolling.current = false;
+      }, 150);
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [onManualScroll]);
 
   // Effect for handling playback-based updates
   useEffect(() => {
@@ -23,9 +54,18 @@ const TranscriptionView = ({
       if (currentSegment !== activeSegment || currentWord !== activeWord) {
         setActiveSegment(currentSegment);
         setActiveWord(currentWord);
+        
+        // Only auto-scroll if following is enabled and no search term
+        if (isFollowing && !searchTerm) {
+          isAutoScrolling.current = true;
+          const element = document.getElementById(`segment-${currentSegment.startTime}`);
+          if (element && containerRef.current) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
       }
     }
-  }, [currentTime, segments, activeSegment, activeWord]);
+  }, [currentTime, segments, activeSegment, activeWord, isFollowing, searchTerm]);
 
   // Handler for manual segment clicks
   const handleSegmentClick = (segment) => {
@@ -65,7 +105,10 @@ const TranscriptionView = ({
   };
 
   return (
-    <div className="transcription-container">
+    <div 
+      ref={containerRef} 
+      className="transcription-container"
+    >
       {filteredSegments.length === 0 ? (
         <div className="text-center p-8 text-gray-500">
           No matching segments found. Try a different search term.

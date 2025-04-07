@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import AudioPlayer from './components/AudioPlayer';
 import TranscriptionView from './components/TranscriptionView';
@@ -15,6 +15,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(true);
+  const isAutoScrolling = useRef(false);
 
   useEffect(() => {
     loadDemoData();
@@ -79,6 +81,37 @@ function App() {
     setCurrentTime(time);
   };
 
+  const handleManualScroll = () => {
+    if (!isAutoScrolling.current && isFollowing) {
+      setIsFollowing(false);
+    }
+  };
+
+  const handleSearchFocus = () => {
+    setIsFollowing(false);
+  };
+
+  const handleSearchClear = () => {
+    setIsFollowing(true);
+  };
+
+  const returnToPlayback = () => {
+    isAutoScrolling.current = true;
+    setIsFollowing(true);
+    
+    // Find current segment
+    const currentSegment = segments.find(
+      segment => currentTime >= segment.startTime && currentTime < segment.endTime
+    );
+    
+    if (currentSegment) {
+      const element = document.getElementById(`segment-${currentSegment.startTime}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -126,14 +159,37 @@ function App() {
           </div>
         )}
 
-        <SearchBar onSearch={setSearchTerm} />
-
-        <TranscriptionView
-          segments={segments}
-          currentTime={currentTime}
-          onSegmentClick={handleSegmentClick}
-          searchTerm={searchTerm}
+        <SearchBar 
+          onSearch={setSearchTerm} 
+          onFocus={handleSearchFocus}
+          onClear={handleSearchClear}
         />
+
+        <div className="relative">
+          <TranscriptionView
+            segments={segments}
+            currentTime={currentTime}
+            onSegmentClick={handleSegmentClick}
+            searchTerm={searchTerm}
+            isFollowing={isFollowing}
+            onManualScroll={handleManualScroll}
+            isAutoScrolling={isAutoScrolling}
+          />
+
+          {!isFollowing && !searchTerm && (
+            <div className="fixed bottom-24 left-1/2 transform -translate-x-1/2 z-50">
+              <button
+                onClick={returnToPlayback}
+                className="px-4 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 flex items-center shadow-lg"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+                </svg>
+                Return to Playback
+              </button>
+            </div>
+          )}
+        </div>
 
         <AudioPlayer
           audioUrl={audioUrl}

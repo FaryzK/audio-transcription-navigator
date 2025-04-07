@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const SearchBar = ({ onSearch }) => {
+const SearchBar = ({ onSearch, onFocus, onClear }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const inputRef = useRef(null);
 
@@ -26,6 +26,7 @@ const SearchBar = ({ onSearch }) => {
   const clearSearch = () => {
     setSearchTerm('');
     onSearch('');
+    onClear?.();
     inputRef.current?.focus();
   };
 
@@ -43,6 +44,7 @@ const SearchBar = ({ onSearch }) => {
             type="text"
             value={searchTerm}
             onChange={handleSearch}
+            onFocus={() => onFocus?.()}
             placeholder="Search transcription... (Ctrl+F or Cmd+F)"
             className="w-full pl-10 pr-10 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
