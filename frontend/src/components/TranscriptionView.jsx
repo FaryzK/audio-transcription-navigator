@@ -7,7 +7,8 @@ const TranscriptionView = ({
   searchTerm,
   isFollowing,
   onManualScroll,
-  isAutoScrolling
+  isAutoScrolling,
+  onEnableFollowing
 }) => {
   const [activeSegment, setActiveSegment] = useState(null);
   const [activeWord, setActiveWord] = useState(null);
@@ -109,8 +110,21 @@ const TranscriptionView = ({
 
   // Handler for manual segment clicks
   const handleSegmentClick = (segment) => {
+    console.log('Segment clicked', {
+      segmentStartTime: segment.startTime,
+      isAutoScrolling: isAutoScrolling.current
+    });
+
     setActiveSegment(segment);
     onSegmentClick(segment.startTime);
+    onEnableFollowing(); // Re-enable following mode
+
+    // Ensure clicked segment is visible
+    const element = document.getElementById(`segment-${segment.startTime}`);
+    if (element && containerRef.current) {
+      isAutoScrolling.current = true; // Prevent this scroll from triggering manual mode
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   };
 
   const filteredSegments = searchTerm
@@ -134,7 +148,21 @@ const TranscriptionView = ({
             } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
             onClick={(e) => {
               e.stopPropagation();
+              console.log('Word clicked', {
+                wordStart: word.start,
+                segmentStartTime: segment.startTime,
+                isAutoScrolling: isAutoScrolling.current
+              });
+
               onSegmentClick(word.start);
+              onEnableFollowing(); // Re-enable following mode
+              
+              // Ensure the segment containing this word is visible
+              const element = document.getElementById(`segment-${segment.startTime}`);
+              if (element && containerRef.current) {
+                isAutoScrolling.current = true; // Prevent this scroll from triggering manual mode
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
             }}
           >
             {word.text}

@@ -91,6 +91,11 @@ function App() {
     }
   };
 
+  const enableFollowing = () => {
+    console.log('App: Enabling following mode');
+    setIsFollowing(true);
+  };
+
   const handleSearchFocus = () => {
     console.log('App: Search focused - switching to exploring mode');
     setIsFollowing(false);
@@ -187,6 +192,7 @@ function App() {
             isFollowing={isFollowing}
             onManualScroll={handleManualScroll}
             isAutoScrolling={isAutoScrolling}
+            onEnableFollowing={enableFollowing}
           />
 
           {!isFollowing && !searchTerm && (
