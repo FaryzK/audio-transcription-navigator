@@ -13,31 +13,59 @@ const TranscriptionView = ({
   const [activeWord, setActiveWord] = useState(null);
   const containerRef = useRef(null);
   const scrollTimeout = useRef(null);
+  const isUserScrolling = useRef(false);
 
-  // Add scroll event listener
+  // Add scroll event listeners
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleScroll = () => {
+      console.log('Scroll detected', {
+        isAutoScrolling: isAutoScrolling.current,
+        isUserScrolling: isUserScrolling.current
+      });
+
       // Clear existing timeout
       if (scrollTimeout.current) {
         clearTimeout(scrollTimeout.current);
       }
 
-      // Only trigger manual scroll if it's not an auto-scroll
-      if (!isAutoScrolling.current) {
-        onManualScroll?.();
-      }
-
       // Reset auto-scrolling flag after scroll ends
       scrollTimeout.current = setTimeout(() => {
+        console.log('Scroll timeout completed - resetting flags');
         isAutoScrolling.current = false;
+        isUserScrolling.current = false;
       }, 150);
     };
 
+    // Detect when user starts scrolling via wheel
+    const handleWheel = () => {
+      console.log('Wheel event detected');
+      // Immediately stop auto-scrolling and switch to manual mode
+      isAutoScrolling.current = false;
+      isUserScrolling.current = true;
+      onManualScroll?.();
+    };
+
+    // Detect when user starts scrolling via touch
+    const handleTouchStart = () => {
+      console.log('Touch start detected');
+      // Immediately stop auto-scrolling and switch to manual mode
+      isAutoScrolling.current = false;
+      isUserScrolling.current = true;
+      onManualScroll?.();
+    };
+
     container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    container.addEventListener('wheel', handleWheel, { passive: true });
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('touchstart', handleTouchStart);
+    };
   }, [onManualScroll]);
 
   // Effect for handling playback-based updates
@@ -55,13 +83,25 @@ const TranscriptionView = ({
         setActiveSegment(currentSegment);
         setActiveWord(currentWord);
         
-        // Only auto-scroll if following is enabled and no search term
-        if (isFollowing && !searchTerm) {
+        // Only auto-scroll if following is enabled, no search term, and no user scrolling
+        if (isFollowing && !searchTerm && !isUserScrolling.current) {
+          console.log('Auto-scrolling to segment', {
+            segmentStartTime: currentSegment.startTime,
+            currentTime,
+            isAutoScrolling: isAutoScrolling.current,
+            isUserScrolling: isUserScrolling.current
+          });
           isAutoScrolling.current = true;
           const element = document.getElementById(`segment-${currentSegment.startTime}`);
           if (element && containerRef.current) {
             element.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
+        } else {
+          console.log('Skipping auto-scroll', {
+            isFollowing,
+            hasSearchTerm: !!searchTerm,
+            isUserScrolling: isUserScrolling.current
+          });
         }
       }
     }

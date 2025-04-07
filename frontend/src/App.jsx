@@ -83,19 +83,29 @@ function App() {
 
   const handleManualScroll = () => {
     if (!isAutoScrolling.current && isFollowing) {
+      console.log('App: Manual scroll detected - switching to exploring mode', {
+        wasFollowing: isFollowing,
+        isAutoScrolling: isAutoScrolling.current
+      });
       setIsFollowing(false);
     }
   };
 
   const handleSearchFocus = () => {
+    console.log('App: Search focused - switching to exploring mode');
     setIsFollowing(false);
   };
 
   const handleSearchClear = () => {
+    console.log('App: Search cleared - switching to following mode');
     setIsFollowing(true);
   };
 
   const returnToPlayback = () => {
+    console.log('App: Return to playback clicked', {
+      currentTime,
+      isAutoScrolling: isAutoScrolling.current
+    });
     isAutoScrolling.current = true;
     setIsFollowing(true);
     
@@ -105,6 +115,9 @@ function App() {
     );
     
     if (currentSegment) {
+      console.log('App: Scrolling to segment', {
+        segmentStartTime: currentSegment.startTime
+      });
       const element = document.getElementById(`segment-${currentSegment.startTime}`);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth' });
