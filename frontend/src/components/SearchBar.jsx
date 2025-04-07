@@ -21,6 +21,10 @@ const SearchBar = ({ onSearch, onFocus, onClear }) => {
     const value = e.target.value;
     setSearchTerm(value);
     onSearch(value);
+    // Only trigger onFocus when text is being entered
+    if (value && onFocus) {
+      onFocus();
+    }
   };
 
   const clearSearch = () => {
@@ -44,7 +48,6 @@ const SearchBar = ({ onSearch, onFocus, onClear }) => {
             type="text"
             value={searchTerm}
             onChange={handleSearch}
-            onFocus={() => onFocus?.()}
             placeholder="Search transcription... (Ctrl+F or Cmd+F)"
             className="w-full pl-10 pr-10 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
