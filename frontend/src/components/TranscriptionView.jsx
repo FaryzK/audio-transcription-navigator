@@ -9,10 +9,12 @@ const TranscriptionView = ({
 }) => {
   const [activeSegment, setActiveSegment] = useState(null);
   const [activeWord, setActiveWord] = useState(null);
+  const [isFollowingPlayback, setIsFollowingPlayback] = useState(true);
   const containerRef = useRef(null);
 
+  // Effect for handling playback-based updates
   useEffect(() => {
-    if (!isFocused) return;
+    if (!isFocused || !isFollowingPlayback) return;
 
     const currentSegment = segments.find(
       segment => currentTime >= segment.startTime && currentTime < segment.endTime
@@ -35,7 +37,17 @@ const TranscriptionView = ({
         }
       }
     }
-  }, [currentTime, segments, isFocused, activeSegment, activeWord]);
+  }, [currentTime, segments, isFocused, activeSegment, activeWord, isFollowingPlayback]);
+
+  // Handler for manual segment clicks
+  const handleSegmentClick = (segment) => {
+    setIsFollowingPlayback(false); // Disable auto-following when manually selecting
+    setActiveSegment(segment);
+    onSegmentClick(segment.startTime);
+    
+    // Re-enable following playback after a short delay
+    setTimeout(() => setIsFollowingPlayback(true), 1000);
+  };
 
   const filteredSegments = searchTerm
     ? segments.filter(segment => 
@@ -82,7 +94,7 @@ const TranscriptionView = ({
             className={`transcription-segment p-3 mb-2 rounded-lg transition-all duration-200 ${
               activeSegment === segment ? 'bg-blue-50 border-l-4 border-blue-500 shadow-sm' : 'border-l-4 border-transparent'
             }`}
-            onClick={() => onSegmentClick(segment.startTime)}
+            onClick={() => handleSegmentClick(segment)}
           >
             <div className="flex justify-between items-center">
               <div className="text-sm text-gray-500">

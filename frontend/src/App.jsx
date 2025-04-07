@@ -70,6 +70,10 @@ function App() {
 
   const handleSegmentClick = (startTime) => {
     setCurrentTime(startTime);
+    const audioElement = document.querySelector('audio');
+    if (audioElement) {
+      audioElement.currentTime = startTime;
+    }
   };
 
   const handleTimeUpdate = (time) => {
