@@ -19,7 +19,6 @@ const TranscriptionView = ({
     const container = containerRef.current;
     if (!container) return;
 
-    // Detect when user starts scrolling via wheel or touch
     const handleUserInteraction = () => {
       console.log('User interaction detected - switching to exploring mode');
       onManualScroll?.();
@@ -49,7 +48,6 @@ const TranscriptionView = ({
         setActiveSegment(currentSegment);
         setActiveWord(currentWord);
         
-        // Only auto-scroll if following is enabled and no search term
         if (isFollowing && !searchTerm) {
           console.log('Auto-scrolling to segment', {
             segmentStartTime: currentSegment.startTime,
@@ -64,7 +62,6 @@ const TranscriptionView = ({
     }
   }, [currentTime, segments, activeSegment, activeWord, isFollowing, searchTerm]);
 
-  // Handler for manual segment clicks
   const handleSegmentClick = (segment) => {
     console.log('Segment clicked', {
       segmentStartTime: segment.startTime
@@ -72,20 +69,47 @@ const TranscriptionView = ({
 
     setActiveSegment(segment);
     onSegmentClick(segment.startTime);
-    onEnableFollowing(); // Re-enable following mode
+    onEnableFollowing();
 
-    // Ensure clicked segment is visible
     const element = document.getElementById(`segment-${segment.startTime}`);
     if (element && containerRef.current) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   };
 
+  // Updated search logic to include translations
   const filteredSegments = searchTerm
-    ? segments.filter(segment => 
-        segment.text.toLowerCase().includes(searchTerm.toLowerCase())
-      )
+    ? segments.filter(segment => {
+        const searchLower = searchTerm.toLowerCase();
+        // Search in original text
+        const matchesOriginal = segment.text.toLowerCase().includes(searchLower);
+        // Search in translation if available
+        const matchesTranslation = segment.translation 
+          ? segment.translation.toLowerCase().includes(searchLower)
+          : false;
+        return matchesOriginal || matchesTranslation;
+      })
     : segments;
+
+  const highlightSearchTerm = (text, isTranslation = false) => {
+    if (!searchTerm || !text) return text;
+
+    const searchLower = searchTerm.toLowerCase();
+    const textLower = text.toLowerCase();
+    const index = textLower.indexOf(searchLower);
+
+    if (index === -1) return text;
+
+    return (
+      <>
+        {text.slice(0, index)}
+        <span className={`bg-yellow-200 ${isTranslation ? 'italic' : ''}`}>
+          {text.slice(index, index + searchTerm.length)}
+        </span>
+        {text.slice(index + searchTerm.length)}
+      </>
+    );
+  };
 
   const renderWords = (segment) => {
     if (!segment.words) {
@@ -96,38 +120,36 @@ const TranscriptionView = ({
       <>
         {/* Original text (Chinese or English) with word-level highlighting */}
         <div className={`${segment.isChineseAudio ? 'text-lg mb-1' : 'text-base'}`}>
-          {segment.words.map((word, index) => (
-            <span
-              key={`${segment.startTime}-${word.start}-${index}`}
-              className={`word-segment ${
-                activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
-              } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
-              onClick={(e) => {
-                e.stopPropagation();
-                console.log('Word clicked', {
-                  wordStart: word.start,
-                  segmentStartTime: segment.startTime,
-                  isAutoScrolling: isAutoScrolling.current
-                });
-
-                onSegmentClick(word.start);
-                onEnableFollowing();
-                
-                const element = document.getElementById(`segment-${segment.startTime}`);
-                if (element && containerRef.current) {
-                  isAutoScrolling.current = true;
-                  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-              }}
-            >
-              {word.text}
-            </span>
-          ))}
+          {searchTerm && segment.text.toLowerCase().includes(searchTerm.toLowerCase()) ? (
+            highlightSearchTerm(segment.text)
+          ) : (
+            segment.words.map((word, index) => (
+              <span
+                key={`${segment.startTime}-${word.start}-${index}`}
+                className={`word-segment ${
+                  activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
+                } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSegmentClick(word.start);
+                  onEnableFollowing();
+                  
+                  const element = document.getElementById(`segment-${segment.startTime}`);
+                  if (element && containerRef.current) {
+                    isAutoScrolling.current = true;
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }}
+              >
+                {word.text}
+              </span>
+            ))
+          )}
         </div>
         {/* English translation (only for Chinese audio) */}
         {segment.isChineseAudio && segment.translation && (
           <div className="text-gray-600 text-base italic mt-1">
-            {segment.translation}
+            {searchTerm ? highlightSearchTerm(segment.translation, true) : segment.translation}
           </div>
         )}
       </>
