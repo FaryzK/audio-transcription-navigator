@@ -474,10 +474,15 @@ app.post('/transcribe', upload.single('audio'), async (req, res) => {
       }
 
       console.log('All chunks processed, cleaning up...');
+      // Clean up chunk files and directory
       for (const chunkPath of chunkPaths) {
-        fs.unlinkSync(chunkPath);
+        if (fs.existsSync(chunkPath)) {
+          fs.unlinkSync(chunkPath);
+        }
       }
-      fs.rmdirSync(chunksDir);
+      if (fs.existsSync(chunksDir)) {
+        fs.rmdirSync(chunksDir);
+      }
     } else {
       res.write(JSON.stringify({
         status: 'processing',
@@ -504,16 +509,29 @@ app.post('/transcribe', upload.single('audio'), async (req, res) => {
       transcriptionProgress: 100,
       segments: allSegments
     }) + '\n---\n');
+
+    // Clean up the temporary file after successful transcription
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+      console.log('Cleaned up temporary file:', tempFilePath);
+    }
+
     res.end();
 
   } catch (error) {
     console.error('Transcription error:', error);
+    
+    // Clean up all temporary files in case of error
     if (tempFilePath && fs.existsSync(tempFilePath)) {
       fs.unlinkSync(tempFilePath);
+      console.log('Cleaned up temporary file after error:', tempFilePath);
     }
     if (chunksDir && fs.existsSync(chunksDir)) {
-      fs.rmdirSync(chunksDir, { recursive: true });
+      // Recursively remove the chunks directory and its contents
+      fs.rmSync(chunksDir, { recursive: true, force: true });
+      console.log('Cleaned up chunks directory after error:', chunksDir);
     }
+
     if (!res.headersSent) {
       res.status(500).json({ 
         error: 'Transcription failed: ' + error.message,
