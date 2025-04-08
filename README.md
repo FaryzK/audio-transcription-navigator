@@ -89,3 +89,38 @@ A modern web application for navigating audio transcriptions with synchronized p
 
 - `GET /api/demo-data`: Fetches demo audio and transcription
 - `POST /api/transcribe`: Uploads and transcribes new audio files 
+```
+audio_transcription_navigator
+├─ README.md
+├─ backend
+│  ├─ package-lock.json
+│  ├─ package.json
+│  ├─ public
+│  │  ├─ demo
+│  │  │  ├─ demo-audio-cn.m4a
+│  │  │  ├─ demo-audio.mp4
+│  │  │  └─ demo-transcription.json
+│  │  └─ uploads
+│  ├─ server.js
+│  └─ transcribe-demo.js
+└─ frontend
+   ├─ README.md
+   ├─ eslint.config.js
+   ├─ index.html
+   ├─ package-lock.json
+   ├─ package.json
+   ├─ postcss.config.js
+   ├─ public
+   ├─ src
+   │  ├─ App.jsx
+   │  ├─ assets
+   │  ├─ components
+   │  │  ├─ AudioPlayer.jsx
+   │  │  ├─ SearchBar.jsx
+   │  │  └─ TranscriptionView.jsx
+   │  ├─ index.css
+   │  └─ main.jsx
+   ├─ tailwind.config.js
+   └─ vite.config.js
+
+```

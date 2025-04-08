@@ -17,10 +17,24 @@ const OPENAI_SIZE_LIMIT = 25 * 1024 * 1024; // 25MB - OpenAI's limit
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB max upload size
 const CHUNK_DURATION = 300; // 5 minutes per chunk
 
+// Add this near the top of the file, after other imports
+const DEMO_DATA = {
+  en: {
+    audioUrl: '/demo/demo-audio.mp4',
+    transcriptionPath: path.join(__dirname, 'public', 'demo', 'demo-transcription.json')
+  },
+  zh: {
+    audioUrl: '/demo/demo-audio-cn.m4a',
+    transcriptionPath: path.join(__dirname, 'public', 'demo', 'demo-transcription-cn.json')
+  }
+};
+
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Configure multer for memory storage (don't save files to disk)
 const storage = multer.memoryStorage();
@@ -374,19 +388,36 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
 
 // Routes
 app.get('/demo-data', (req, res) => {
+  const language = req.query.language || 'en';
+  const demoConfig = DEMO_DATA[language];
+  
+  if (!demoConfig) {
+    return res.status(400).json({ error: 'Invalid language selection' });
+  }
+
   try {
-    const transcriptionPath = path.join(__dirname, 'public/demo/demo-transcription.json');
-    const transcription = JSON.parse(fs.readFileSync(transcriptionPath, 'utf8'));
-    
-    // Get the server's base URL
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    if (!fs.existsSync(demoConfig.transcriptionPath)) {
+      console.error(`Transcription file not found: ${demoConfig.transcriptionPath}`);
+      return res.status(500).json({ error: 'Demo transcription file not found' });
+    }
+
+    const transcriptionData = fs.readFileSync(demoConfig.transcriptionPath, 'utf8');
+    const transcription = JSON.parse(transcriptionData);
+
+    // Check if the audio file exists
+    const audioFilePath = path.join(__dirname, 'public', demoConfig.audioUrl);
+    if (!fs.existsSync(audioFilePath)) {
+      console.error(`Audio file not found: ${audioFilePath}`);
+      return res.status(500).json({ error: 'Demo audio file not found' });
+    }
     
     res.json({
-      audioUrl: `${baseUrl}/demo/demo-audio.mp4`,
-      transcription: transcription
+      audioUrl: demoConfig.audioUrl,
+      transcription: transcription,
+      language: language
     });
   } catch (error) {
-    console.error('Error serving demo data:', error);
+    console.error('Error loading demo data:', error);
     res.status(500).json({ error: 'Failed to load demo data' });
   }
 });

@@ -12,6 +12,11 @@ export default defineConfig({
         changeOrigin: true,
         // Remove the /api prefix when forwarding to the backend
         rewrite: (path) => path.replace(/^\/api/, '')
+      },
+      // Proxy demo file requests to the backend server
+      '/demo': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   }

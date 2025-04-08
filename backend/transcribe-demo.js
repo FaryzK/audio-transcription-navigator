@@ -1,27 +1,29 @@
 const fs = require('fs');
 const path = require('path');
-const { OpenAI } = require('openai');
 const { exec } = require('child_process');
 const util = require('util');
-const execPromise = util.promisify(exec);
+const OpenAI = require('openai');
 require('dotenv').config();
+
+const execPromise = util.promisify(exec);
 
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Maximum file size in bytes (24MB to be safe)
-const MAX_FILE_SIZE = 24 * 1024 * 1024;
+const CHUNK_DURATION = 300; // 5 minutes in seconds
 
 async function splitAudioFile(inputPath, outputDir) {
+  console.log(`Splitting audio file: ${inputPath}`);
+  console.log(`Output directory: ${outputDir}`);
+
   try {
     // Create output directory if it doesn't exist
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    console.log('Getting audio duration...');
     // Get audio duration using ffprobe
     const { stdout: durationOutput } = await execPromise(
       `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`
@@ -30,24 +32,22 @@ async function splitAudioFile(inputPath, outputDir) {
     console.log(`Audio duration: ${duration} seconds`);
 
     // Calculate number of chunks needed
-    const chunkDuration = 300; // 5 minutes per chunk
-    const numChunks = Math.ceil(duration / chunkDuration);
+    const numChunks = Math.ceil(duration / CHUNK_DURATION);
     const chunkPaths = [];
 
-    console.log(`Splitting into ${numChunks} chunks...`);
     // Split the audio file
     for (let i = 0; i < numChunks; i++) {
-      const startTime = i * chunkDuration;
+      const startTime = i * CHUNK_DURATION;
       const outputPath = path.join(outputDir, `chunk_${i}.mp3`);
       
       console.log(`Creating chunk ${i + 1}/${numChunks}...`);
       
-      // Add timeout and error handling for ffmpeg command
       try {
-        const ffmpegCommand = `ffmpeg -y -i "${inputPath}" -ss ${startTime} -t ${chunkDuration} -acodec libmp3lame -ar 44100 "${outputPath}"`;
+        // Add -vn flag to ignore video streams and -ac 1 for mono audio
+        const ffmpegCommand = `ffmpeg -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -vn -ac 1 -ar 16000 -b:a 64k "${outputPath}"`;
         console.log(`Running command: ${ffmpegCommand}`);
         
-        const { stdout, stderr } = await execPromise(ffmpegCommand);
+        const { stderr } = await execPromise(ffmpegCommand);
         if (stderr) {
           console.log(`FFmpeg output for chunk ${i + 1}:`, stderr);
         }
@@ -70,117 +70,160 @@ async function splitAudioFile(inputPath, outputDir) {
       }
     }
 
-    return chunkPaths;
+    return { chunkPaths, numChunks };
   } catch (error) {
     console.error('Error splitting audio file:', error);
     throw error;
   }
 }
 
-async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks) {
-  console.log(`Transcribing chunk ${chunkIndex + 1}/${totalChunks}...`);
-  const audioFile = fs.createReadStream(chunkPath);
-  const transcription = await openai.audio.transcriptions.create({
-    file: audioFile,
-    model: "whisper-1",
-    response_format: "verbose_json",
-    timestamp_granularities: ["word", "segment"]
-  });
+async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, language = 'en') {
+  console.log(`Transcribing chunk ${chunkIndex + 1}/${totalChunks} in ${language}`);
+  
+  try {
+    // First get the transcription
+    const transcriptionFile = fs.createReadStream(chunkPath);
+    const transcription = await openai.audio.transcriptions.create({
+      file: transcriptionFile,
+      model: "whisper-1",
+      language: language,
+      response_format: "verbose_json",
+      timestamp_granularities: ["word", "segment"]
+    });
 
-  console.log('Received transcription response:', JSON.stringify(transcription, null, 2));
+    console.log(`Got transcription for chunk ${chunkIndex + 1}`);
 
-  // Calculate time offset for this chunk
-  const timeOffset = chunkIndex * 300; // Assuming CHUNK_DURATION is 300 seconds
+    // For Chinese audio, get the translation
+    let translation = null;
+    if (language === 'zh') {
+      console.log(`Getting translation for chunk ${chunkIndex + 1}`);
+      const translationFile = fs.createReadStream(chunkPath);
+      translation = await openai.audio.translations.create({
+        file: translationFile,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["segment"]
+      });
+      console.log(`Got translation for chunk ${chunkIndex + 1}`);
+    }
 
-  // Process segments and associate words with them
-  const processedSegments = transcription.segments.map(segment => {
-    // Adjust segment timestamps
-    const startTime = segment.start + timeOffset;
-    const endTime = segment.end + timeOffset;
+    // Calculate time offset for this chunk
+    const timeOffset = chunkIndex * CHUNK_DURATION;
 
-    // Find words that belong to this segment based on their timestamps
-    const segmentWords = transcription.words.filter(word => {
-      const wordStart = word.start + timeOffset;
-      const wordEnd = word.end + timeOffset;
-      return wordStart >= startTime && wordEnd <= endTime;
-    }).map(word => ({
-      text: word.word,
-      start: word.start + timeOffset,
-      end: word.end + timeOffset
-    }));
+    // Process segments and associate words with them
+    const processedSegments = transcription.segments.map((segment, index) => {
+      // Adjust segment timestamps
+      const startTime = segment.start + timeOffset;
+      const endTime = segment.end + timeOffset;
 
-    return {
-      startTime,
-      endTime,
-      text: segment.text,
-      words: segmentWords
-    };
-  });
+      // Find words that belong to this segment based on their timestamps
+      const segmentWords = transcription.words
+        ? transcription.words.filter(word => {
+            const wordStart = word.start + timeOffset;
+            const wordEnd = word.end + timeOffset;
+            return wordStart >= startTime && wordEnd <= endTime;
+          }).map(word => ({
+            text: word.word,
+            start: word.start + timeOffset,
+            end: word.end + timeOffset
+          }))
+        : [];
 
-  return processedSegments;
+      const result = {
+        startTime,
+        endTime,
+        text: segment.text,
+        words: segmentWords
+      };
+
+      // Add translation if available
+      if (language === 'zh' && translation?.segments[index]) {
+        result.translation = translation.segments[index].text;
+        result.isChineseAudio = true;
+      }
+
+      return result;
+    });
+
+    return processedSegments;
+  } catch (error) {
+    console.error(`Error transcribing chunk ${chunkIndex + 1}:`, error);
+    throw error;
+  }
 }
 
 async function transcribeDemoAudio() {
   try {
-    console.log('Starting transcription of demo audio...');
-    
-    // Path to the demo audio file
-    const audioPath = path.join(__dirname, 'public/demo/demo-audio.mp4');
-    const chunksDir = path.join(__dirname, 'public/demo/chunks');
-    
-    // Check if the file exists
-    if (!fs.existsSync(audioPath)) {
-      console.error(`Error: Demo audio file not found at ${audioPath}`);
-      return;
-    }
-
-    // Get file size
-    const stats = fs.statSync(audioPath);
-    const fileSize = stats.size;
-    console.log(`File size: ${(fileSize / (1024 * 1024)).toFixed(2)} MB`);
-
-    let transcriptions = [];
-
-    if (fileSize > MAX_FILE_SIZE) {
-      console.log('File size exceeds limit, splitting into chunks...');
-      try {
-        const chunkPaths = await splitAudioFile(audioPath, chunksDir);
-        
-        console.log(`Split audio into ${chunkPaths.length} chunks`);
-        
-        // Process each chunk
-        for (let i = 0; i < chunkPaths.length; i++) {
-          console.log(`Processing chunk ${i + 1}/${chunkPaths.length}...`);
-          const chunkSegments = await transcribeAudioChunk(chunkPaths[i], i, chunkPaths.length);
-          
-          transcriptions = transcriptions.concat(chunkSegments);
-        }
-
-        // Clean up chunk files
-        console.log('Cleaning up chunk files...');
-        for (const chunkPath of chunkPaths) {
-          fs.unlinkSync(chunkPath);
-        }
-        fs.rmdirSync(chunksDir);
-      } catch (error) {
-        console.error('Error during chunking process:', error);
-        throw error;
+    // Process both English and Chinese demos
+    const demos = [
+      {
+        inputPath: path.join(__dirname, 'public', 'demo', 'demo-audio.mp4'),
+        outputPath: path.join(__dirname, 'public', 'demo', 'demo-transcription.json'),
+        language: 'en'
+      },
+      {
+        inputPath: path.join(__dirname, 'public', 'demo', 'demo-audio-cn.m4a'),
+        outputPath: path.join(__dirname, 'public', 'demo', 'demo-transcription-cn.json'),
+        language: 'zh'
       }
-    } else {
-      console.log('Processing file directly...');
-      const segments = await transcribeAudioChunk(audioPath, 0, 1);
-      transcriptions = segments;
+    ];
+
+    for (const demo of demos) {
+      console.log(`\nProcessing ${demo.language.toUpperCase()} demo...`);
+      console.log(`Input file: ${demo.inputPath}`);
+      console.log(`Output file: ${demo.outputPath}`);
+
+      // Check if input file exists
+      if (!fs.existsSync(demo.inputPath)) {
+        console.error(`Input file not found: ${demo.inputPath}`);
+        continue;
+      }
+      
+      // Create temporary directory for chunks
+      const chunksDir = path.join(__dirname, `temp-chunks-${demo.language}`);
+      console.log(`Creating chunks directory: ${chunksDir}`);
+
+      try {
+        // Split audio into chunks
+        const { chunkPaths, numChunks } = await splitAudioFile(demo.inputPath, chunksDir);
+        console.log(`Split audio into ${numChunks} chunks, starting transcription...`);
+        
+        // Transcribe each chunk
+        const transcriptions = [];
+        for (let i = 0; i < chunkPaths.length; i++) {
+          console.log(`Processing chunk ${i + 1}/${numChunks}`);
+          const segments = await transcribeAudioChunk(chunkPaths[i], i, numChunks, demo.language);
+          console.log(`Successfully transcribed chunk ${i + 1}/${numChunks}`);
+          transcriptions.push(...segments);
+        }
+
+        // Sort segments by start time
+        transcriptions.sort((a, b) => a.startTime - b.startTime);
+
+        // Save transcription to file
+        const outputDir = path.dirname(demo.outputPath);
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true });
+        }
+        fs.writeFileSync(demo.outputPath, JSON.stringify(transcriptions, null, 2));
+        console.log(`${demo.language.toUpperCase()} transcription saved to ${demo.outputPath}`);
+        
+        // Clean up chunks
+        console.log('Cleaning up chunks...');
+        for (const chunkPath of chunkPaths) {
+          if (fs.existsSync(chunkPath)) {
+            fs.unlinkSync(chunkPath);
+          }
+        }
+        if (fs.existsSync(chunksDir)) {
+          fs.rmdirSync(chunksDir);
+        }
+      } catch (error) {
+        console.error(`Error processing ${demo.language} demo:`, error);
+      }
     }
     
-    // Path to save the transcription
-    const transcriptionPath = path.join(__dirname, 'public/demo/demo-transcription.json');
-    
-    // Save the transcription to a file
-    fs.writeFileSync(transcriptionPath, JSON.stringify(transcriptions, null, 2));
-    
-    console.log(`Transcription saved to ${transcriptionPath}`);
-    console.log(`Total segments: ${transcriptions.length}`);
-    
+    console.log('\nAll demo transcriptions completed');
   } catch (error) {
     console.error('Error transcribing demo audio:', error);
   }

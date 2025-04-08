@@ -21,6 +21,7 @@ function App() {
   const [chunkingProgress, setChunkingProgress] = useState(0);
   const [currentStage, setCurrentStage] = useState(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const [demoLanguage, setDemoLanguage] = useState('en');
 
   useEffect(() => {
     loadDemoData();
@@ -30,12 +31,14 @@ function App() {
         URL.revokeObjectURL(uploadedAudioUrl.current);
       }
     };
-  }, []);
+  }, [demoLanguage]);
 
   const loadDemoData = async () => {
     try {
       setIsLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/demo-data`);
+      const response = await axios.get(`${API_BASE_URL}/demo-data`, {
+        params: { language: demoLanguage }
+      });
       setAudioUrl(response.data.audioUrl);
       setSegments(response.data.transcription);
       setError(null);
@@ -63,7 +66,7 @@ function App() {
     formData.append('audio', file);
 
     try {
-      const response = await fetch('http://localhost:3001/transcribe', {
+      const response = await fetch(`${API_BASE_URL}/transcribe`, {
         method: 'POST',
         body: formData
       });
@@ -209,23 +212,38 @@ function App() {
     <div className="min-h-screen bg-gray-100 pt-12">
       <div className="container mx-auto px-4">
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h1 className="text-2xl font-bold mb-4">Audio Transcription</h1>
-          <label className="block">
-            <span className="sr-only">Choose audio file</span>
-            <input
-              type="file"
-              accept=".mp3,.m4a,.wav,.mp4"
-              onChange={handleFileUpload}
-              className="block w-full text-sm text-gray-500
-                file:mr-4 file:py-2 file:px-4
-                file:rounded-full file:border-0
-                file:text-sm file:font-semibold
-                file:bg-blue-50 file:text-blue-700
-                hover:file:bg-blue-100
-                cursor-pointer
-              "
-            />
-          </label>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold">Audio Transcription</h1>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-700">Demo Language:</span>
+                <select
+                  value={demoLanguage}
+                  onChange={(e) => setDemoLanguage(e.target.value)}
+                  className="appearance-none bg-gray-100 text-gray-700 py-1 px-3 pr-8 rounded leading-tight focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="en">English</option>
+                  <option value="zh">Chinese</option>
+                </select>
+              </div>
+              <label className="block flex-1">
+                <span className="sr-only">Choose audio file</span>
+                <input
+                  type="file"
+                  accept=".mp3,.m4a,.wav,.mp4"
+                  onChange={handleFileUpload}
+                  className="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-blue-50 file:text-blue-700
+                    hover:file:bg-blue-100
+                    cursor-pointer
+                  "
+                />
+              </label>
+            </div>
+          </div>
         </div>
 
         {isLoading && (
