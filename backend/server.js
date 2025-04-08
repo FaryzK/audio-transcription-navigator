@@ -206,51 +206,52 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
       transcriptionProgress: (chunkIndex / totalChunks) * 100
     }) + '\n---\n');
 
-    // Verify the chunk file exists and has content
-    if (!fs.existsSync(chunkPath)) {
-      throw new Error(`Chunk file ${chunkIndex + 1} not found at ${chunkPath}`);
-    }
-
-    const stats = fs.statSync(chunkPath);
-    console.log(`Chunk ${chunkIndex + 1} size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
-
-    // First get the Chinese transcription
-    const audioFile = fs.createReadStream(chunkPath);
-    console.log(`Created read stream for chunk ${chunkIndex + 1} for transcription`);
-
-    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API for Chinese transcription...`);
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: "whisper-1",
-      response_format: "verbose_json",
-      timestamp_granularities: ["word", "segment"],
-      language: "zh"
-    }).catch(error => {
-      console.error(`OpenAI API error for chunk ${chunkIndex + 1} transcription:`, error.message);
-      if (error.response) {
-        console.error('API Response:', error.response.data);
-      }
-      throw error;
-    });
-
-    // Now get the English translation
-    const translationFile = fs.createReadStream(chunkPath);
-    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API for English translation...`);
-    const translation = await openai.audio.translations.create({
-      file: translationFile,
+    // First get the transcription to detect language
+    const detectFile = fs.createReadStream(chunkPath);
+    const detection = await openai.audio.transcriptions.create({
+      file: detectFile,
       model: "whisper-1",
       response_format: "verbose_json"
-    }).catch(error => {
-      console.error(`OpenAI API error for chunk ${chunkIndex + 1} translation:`, error.message);
-      if (error.response) {
-        console.error('API Response:', error.response.data);
-      }
-      throw error;
     });
 
-    console.log(`Received transcription and translation for chunk ${chunkIndex + 1}`);
-    console.log('Sample of transcription data:', JSON.stringify(transcription.segments[0], null, 2));
-    console.log('Sample of translation data:', JSON.stringify(translation.segments[0], null, 2));
+    // Detect if the audio is in Chinese
+    const isChineseAudio = detection.language === 'chinese' || 
+                          detection.segments?.[0]?.language === 'chinese';
+
+    console.log('Language detected:', isChineseAudio ? 'Chinese' : 'English');
+
+    let transcription;
+    let translation = null;
+
+    if (isChineseAudio) {
+      // For Chinese audio, get Chinese transcription with word timestamps
+      const chineseFile = fs.createReadStream(chunkPath);
+      transcription = await openai.audio.transcriptions.create({
+        file: chineseFile,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word", "segment"],
+        language: "zh"
+      });
+
+      // Get English translation
+      const translationFile = fs.createReadStream(chunkPath);
+      translation = await openai.audio.translations.create({
+        file: translationFile,
+        model: "whisper-1",
+        response_format: "verbose_json"
+      });
+    } else {
+      // For English audio, get English transcription with word timestamps
+      const englishFile = fs.createReadStream(chunkPath);
+      transcription = await openai.audio.transcriptions.create({
+        file: englishFile,
+        model: "whisper-1",
+        response_format: "verbose_json",
+        timestamp_granularities: ["word", "segment"],
+        language: "en"
+      });
+    }
 
     // Calculate time offset for this chunk
     const timeOffset = chunkIndex * CHUNK_DURATION;
@@ -261,20 +262,57 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
       const startTime = segment.start + timeOffset;
       const endTime = segment.end + timeOffset;
 
-      // Get corresponding translation segment
-      const translationSegment = translation.segments[index];
-      const translationText = translationSegment ? translationSegment.text : '';
+      // Get corresponding translation segment if Chinese
+      const translationText = isChineseAudio && translation?.segments[index] 
+        ? translation.segments[index].text.trim()
+        : null;
 
       // Process words if available in the segment
       let segmentWords = [];
       if (segment.words && Array.isArray(segment.words)) {
-        segmentWords = segment.words.map(word => ({
+        // First get the raw words with their timing information
+        const rawWords = segment.words.map(word => ({
           text: word.text || word.word || "",
-          start: (word.start || word.timestamp) + timeOffset,
+          start: (word.start || word.timestamp || 0) + timeOffset,
           end: (word.end || (word.timestamp + (word.duration || 0))) + timeOffset
         }));
-      } else if (transcription.words) {
-        // Filter global words array for this segment's time range
+
+        // Split the segment text into actual words
+        const actualWords = segment.text.trim().split(/\s+/);
+        
+        // Process words and try to match them with the actual text
+        let currentRawIndex = 0;
+        segmentWords = [];
+        
+        for (let actualWord of actualWords) {
+          if (currentRawIndex >= rawWords.length) break;
+          
+          let combinedWord = {
+            text: actualWord,
+            start: rawWords[currentRawIndex].start,
+            end: rawWords[currentRawIndex].end
+          };
+          
+          let rawWordText = '';
+          let tempIndex = currentRawIndex;
+          
+          while (tempIndex < rawWords.length) {
+            rawWordText += rawWords[tempIndex].text;
+            combinedWord.end = rawWords[tempIndex].end;
+            
+            if (rawWordText.toLowerCase() === actualWord.toLowerCase()) {
+              currentRawIndex = tempIndex + 1;
+              break;
+            }
+            tempIndex++;
+          }
+          
+          segmentWords.push(combinedWord);
+        }
+      }
+
+      // If no words found, try to get them from the global words array
+      if (segmentWords.length === 0 && transcription.words) {
         segmentWords = transcription.words
           .filter(word => {
             const wordStart = (word.start || word.timestamp || 0) + timeOffset;
@@ -282,12 +320,12 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
           })
           .map(word => ({
             text: word.text || word.word || "",
-            start: (word.start || word.timestamp) + timeOffset,
+            start: (word.start || word.timestamp || 0) + timeOffset,
             end: (word.end || (word.timestamp + (word.duration || 0))) + timeOffset
           }));
       }
 
-      // If still no words, split the text
+      // If still no words, split the text evenly
       if (segmentWords.length === 0) {
         const wordTexts = segment.text.trim().split(/\s+/);
         const wordDuration = (endTime - startTime) / wordTexts.length;
@@ -299,17 +337,22 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
         }));
       }
 
-      return {
+      // Create the segment object
+      const processedSegment = {
         startTime,
         endTime,
         text: segment.text.trim(),
-        translation: translationText.trim(),
-        words: segmentWords
+        words: segmentWords,
+        isChineseAudio
       };
-    });
 
-    console.log(`Processed segments for chunk ${chunkIndex + 1}: ${processedSegments.length} segments`);
-    console.log('Sample processed segment:', JSON.stringify(processedSegments[0], null, 2));
+      // Only add translation if it's Chinese audio
+      if (isChineseAudio && translationText) {
+        processedSegment.translation = translationText;
+      }
+
+      return processedSegment;
+    });
 
     // Send chunk completion progress
     res.write(JSON.stringify({
@@ -325,15 +368,6 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
     return processedSegments;
   } catch (error) {
     console.error(`Error transcribing chunk ${chunkIndex + 1}:`, error);
-    res.write(JSON.stringify({
-      status: 'error',
-      stage: 'transcribing',
-      phase: 'error',
-      message: `Error transcribing chunk ${chunkIndex + 1}: ${error.message}`,
-      chunkingProgress: 100,
-      transcriptionProgress: (chunkIndex / totalChunks) * 100,
-      error: error.message
-    }) + '\n---\n');
     throw error;
   }
 }

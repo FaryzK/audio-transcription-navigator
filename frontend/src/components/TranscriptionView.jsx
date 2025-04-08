@@ -93,36 +93,44 @@ const TranscriptionView = ({
     }
 
     return (
-      <div className="mt-1 text-gray-800 leading-relaxed">
-        {segment.words.map((word, index) => (
-          <span
-            key={`${segment.startTime}-${word.start}-${index}`}
-            className={`word-segment ${
-              activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
-            } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
-            onClick={(e) => {
-              e.stopPropagation();
-              console.log('Word clicked', {
-                wordStart: word.start,
-                segmentStartTime: segment.startTime,
-                isAutoScrolling: isAutoScrolling.current
-              });
+      <>
+        {/* Original text (Chinese or English) with word-level highlighting */}
+        <div className={`${segment.isChineseAudio ? 'text-lg mb-1' : 'text-base'}`}>
+          {segment.words.map((word, index) => (
+            <span
+              key={`${segment.startTime}-${word.start}-${index}`}
+              className={`word-segment ${
+                activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
+              } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
+              onClick={(e) => {
+                e.stopPropagation();
+                console.log('Word clicked', {
+                  wordStart: word.start,
+                  segmentStartTime: segment.startTime,
+                  isAutoScrolling: isAutoScrolling.current
+                });
 
-              onSegmentClick(word.start);
-              onEnableFollowing(); // Re-enable following mode
-              
-              // Ensure the segment containing this word is visible
-              const element = document.getElementById(`segment-${segment.startTime}`);
-              if (element && containerRef.current) {
-                isAutoScrolling.current = true; // Prevent this scroll from triggering manual mode
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }
-            }}
-          >
-            {word.text}
-          </span>
-        ))}
-      </div>
+                onSegmentClick(word.start);
+                onEnableFollowing();
+                
+                const element = document.getElementById(`segment-${segment.startTime}`);
+                if (element && containerRef.current) {
+                  isAutoScrolling.current = true;
+                  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              }}
+            >
+              {word.text}
+            </span>
+          ))}
+        </div>
+        {/* English translation (only for Chinese audio) */}
+        {segment.isChineseAudio && segment.translation && (
+          <div className="text-gray-600 text-base italic mt-1">
+            {segment.translation}
+          </div>
+        )}
+      </>
     );
   };
 
@@ -156,14 +164,7 @@ const TranscriptionView = ({
               )}
             </div>
             <div className="mt-2">
-              {/* Chinese text with word-level highlighting */}
-              <div className="text-lg mb-1">
-                {renderWords(segment)}
-              </div>
-              {/* English translation */}
-              <div className="text-gray-600 text-base italic">
-                {segment.translation}
-              </div>
+              {renderWords(segment)}
             </div>
           </div>
         ))
