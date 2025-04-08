@@ -120,14 +120,19 @@ const TranscriptionView = ({
       <>
         {/* Original text (Chinese or English) with word-level highlighting */}
         <div className={`${segment.isChineseAudio ? 'text-lg mb-1' : 'text-base'}`}>
-          {searchTerm && segment.text.toLowerCase().includes(searchTerm.toLowerCase()) ? (
-            highlightSearchTerm(segment.text)
-          ) : (
-            segment.words.map((word, index) => (
+          {segment.words.map((word, index) => {
+            const isSearchMatch = searchTerm && 
+              word.text.toLowerCase().includes(searchTerm.toLowerCase());
+            
+            return (
               <span
                 key={`${segment.startTime}-${word.start}-${index}`}
                 className={`word-segment ${
-                  activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
+                  activeWord === word 
+                    ? 'bg-yellow-300 text-yellow-900' 
+                    : isSearchMatch 
+                      ? 'bg-yellow-200'
+                      : ''
                 } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -143,8 +148,8 @@ const TranscriptionView = ({
               >
                 {word.text}
               </span>
-            ))
-          )}
+            );
+          })}
         </div>
         {/* English translation (only for Chinese audio) */}
         {segment.isChineseAudio && segment.translation && (
