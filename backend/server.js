@@ -214,34 +214,56 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
     const stats = fs.statSync(chunkPath);
     console.log(`Chunk ${chunkIndex + 1} size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
 
+    // First get the Chinese transcription
     const audioFile = fs.createReadStream(chunkPath);
-    console.log(`Created read stream for chunk ${chunkIndex + 1}`);
+    console.log(`Created read stream for chunk ${chunkIndex + 1} for transcription`);
 
-    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API...`);
+    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API for Chinese transcription...`);
     const transcription = await openai.audio.transcriptions.create({
       file: audioFile,
       model: "whisper-1",
       response_format: "verbose_json",
-      timestamp_granularities: ["word", "segment"]
+      timestamp_granularities: ["word", "segment"],
+      language: "zh"
     }).catch(error => {
-      console.error(`OpenAI API error for chunk ${chunkIndex + 1}:`, error.message);
+      console.error(`OpenAI API error for chunk ${chunkIndex + 1} transcription:`, error.message);
       if (error.response) {
         console.error('API Response:', error.response.data);
       }
       throw error;
     });
 
-    console.log(`Received transcription for chunk ${chunkIndex + 1}`);
+    // Now get the English translation
+    const translationFile = fs.createReadStream(chunkPath);
+    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API for English translation...`);
+    const translation = await openai.audio.translations.create({
+      file: translationFile,
+      model: "whisper-1",
+      response_format: "verbose_json"
+    }).catch(error => {
+      console.error(`OpenAI API error for chunk ${chunkIndex + 1} translation:`, error.message);
+      if (error.response) {
+        console.error('API Response:', error.response.data);
+      }
+      throw error;
+    });
+
+    console.log(`Received transcription and translation for chunk ${chunkIndex + 1}`);
     console.log('Sample of transcription data:', JSON.stringify(transcription.segments[0], null, 2));
+    console.log('Sample of translation data:', JSON.stringify(translation.segments[0], null, 2));
 
     // Calculate time offset for this chunk
     const timeOffset = chunkIndex * CHUNK_DURATION;
 
     // Process segments and words
-    const processedSegments = transcription.segments.map(segment => {
+    const processedSegments = transcription.segments.map((segment, index) => {
       // Adjust segment timestamps
       const startTime = segment.start + timeOffset;
       const endTime = segment.end + timeOffset;
+
+      // Get corresponding translation segment
+      const translationSegment = translation.segments[index];
+      const translationText = translationSegment ? translationSegment.text : '';
 
       // Process words if available in the segment
       let segmentWords = [];
@@ -281,6 +303,7 @@ async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
         startTime,
         endTime,
         text: segment.text.trim(),
+        translation: translationText.trim(),
         words: segmentWords
       };
     });

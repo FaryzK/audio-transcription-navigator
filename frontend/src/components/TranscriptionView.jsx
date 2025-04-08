@@ -155,7 +155,16 @@ const TranscriptionView = ({
                 </div>
               )}
             </div>
-            {renderWords(segment)}
+            <div className="mt-2">
+              {/* Chinese text with word-level highlighting */}
+              <div className="text-lg mb-1">
+                {renderWords(segment)}
+              </div>
+              {/* English translation */}
+              <div className="text-gray-600 text-base italic">
+                {segment.translation}
+              </div>
+            </div>
           </div>
         ))
       )}
