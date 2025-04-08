@@ -4,35 +4,64 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { OpenAI } = require('openai');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 3001;
+
+// Constants
+const OPENAI_SIZE_LIMIT = 25 * 1024 * 1024; // 25MB - OpenAI's limit
+const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB max upload size
+const CHUNK_DURATION = 300; // 5 minutes per chunk
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'public/uploads/');
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
+// Configure multer for memory storage (don't save files to disk)
+const storage = multer.memoryStorage();
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB limit
+  limits: { fileSize: MAX_FILE_SIZE },
   fileFilter: (req, file, cb) => {
-    // Accept both M4A and MP4 files
-    if (file.mimetype === 'audio/m4a' || file.mimetype === 'audio/mp4' || file.mimetype === 'video/mp4') {
+    // Accept various audio formats
+    const allowedMimes = [
+      'audio/m4a',
+      'audio/mp4',
+      'audio/mp3',
+      'audio/mpeg',
+      'audio/wav',
+      'video/mp4',
+      'audio/x-m4a',           // Common M4A MIME type
+      'audio/aac',             // AAC audio (often in M4A container)
+      'audio/x-mp4',           // Alternative MP4 audio
+      'audio/MP4A-LATM',       // Another M4A variant
+      'audio/mpeg4-generic',   // Generic MPEG-4 audio
+      'audio/x-mpeg',          // Alternative MPEG audio
+      'audio/x-wav'            // Alternative WAV format
+    ];
+    
+    console.log('Uploaded file MIME type:', file.mimetype);
+    console.log('File size:', (file.size / (1024 * 1024)).toFixed(2), 'MB');
+    
+    if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only M4A and MP4 files are allowed'));
+      // Check file extension as fallback
+      const ext = path.extname(file.originalname).toLowerCase();
+      const allowedExts = ['.m4a', '.mp3', '.mp4', '.wav', '.aac'];
+      
+      if (allowedExts.includes(ext)) {
+        console.log('Allowing file based on extension:', ext);
+        cb(null, true);
+      } else {
+        cb(new Error(`Unsupported file format. Supported formats: MP3, M4A, WAV, MP4. (Got MIME: ${file.mimetype}, Extension: ${ext})`));
+      }
     }
   }
 });
@@ -41,6 +70,250 @@ const upload = multer({
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+async function splitAudioFile(inputPath, outputDir, res) {
+  try {
+    // Create output directory if it doesn't exist
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Send progress update for analysis start
+    res.write(JSON.stringify({
+      status: 'processing',
+      stage: 'chunking',
+      phase: 'analyzing',
+      message: 'Analyzing audio file...',
+      chunkingProgress: 0,
+      transcriptionProgress: 0
+    }) + '\n---\n');
+
+    // Get audio duration using ffprobe
+    const { stdout: durationOutput } = await execPromise(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${inputPath}"`
+    );
+    const duration = parseFloat(durationOutput);
+
+    // Calculate number of chunks needed
+    const numChunks = Math.ceil(duration / CHUNK_DURATION);
+    const chunkPaths = [];
+
+    // Send progress update for splitting start
+    res.write(JSON.stringify({
+      status: 'processing',
+      stage: 'chunking',
+      phase: 'splitting',
+      message: `Splitting audio into ${numChunks} chunks...`,
+      chunkingProgress: 10,
+      transcriptionProgress: 0
+    }) + '\n---\n');
+
+    // Split the audio file
+    for (let i = 0; i < numChunks; i++) {
+      const startTime = i * CHUNK_DURATION;
+      const outputPath = path.join(outputDir, `chunk_${i}.mp3`);
+      
+      // Send chunk progress
+      res.write(JSON.stringify({
+        status: 'processing',
+        stage: 'chunking',
+        phase: 'splitting',
+        message: `Creating chunk ${i + 1}/${numChunks}`,
+        chunkingProgress: 10 + ((i + 1) / numChunks) * 90,
+        transcriptionProgress: 0
+      }) + '\n---\n');
+      
+      try {
+        // Add -vn flag to ignore video streams and -ac 1 for mono audio
+        // Add -y to overwrite output files
+        // Add error level logging
+        const ffmpegCommand = `ffmpeg -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -vn -ac 1 -acodec libmp3lame -ar 16000 -b:a 64k "${outputPath}" -loglevel error`;
+        
+        const { stderr } = await execPromise(ffmpegCommand);
+        if (stderr) {
+          console.log(`FFmpeg output for chunk ${i + 1}:`, stderr);
+        }
+        
+        // Verify the chunk was created and has content
+        if (!fs.existsSync(outputPath)) {
+          throw new Error(`Failed to create chunk ${i + 1}`);
+        }
+        
+        const chunkStats = fs.statSync(outputPath);
+        if (chunkStats.size === 0) {
+          throw new Error(`Chunk ${i + 1} was created but is empty`);
+        }
+
+        // Validate the audio file using ffprobe
+        try {
+          const { stdout: probeOutput } = await execPromise(
+            `ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${outputPath}"`
+          );
+          if (!probeOutput.trim()) {
+            throw new Error(`No audio stream found in chunk ${i + 1}`);
+          }
+        } catch (probeError) {
+          console.error(`Error validating chunk ${i + 1}:`, probeError);
+          throw new Error(`Invalid audio in chunk ${i + 1}`);
+        }
+        
+        chunkPaths.push(outputPath);
+        console.log(`Created chunk ${i + 1}/${numChunks} (${(chunkStats.size / (1024 * 1024)).toFixed(2)} MB)`);
+      } catch (error) {
+        console.error(`Error creating chunk ${i + 1}:`, error);
+        
+        // Send error update
+        res.write(JSON.stringify({
+          status: 'error',
+          stage: 'chunking',
+          phase: 'error',
+          message: `Error creating chunk ${i + 1}: ${error.message}`,
+          error: error.message
+        }) + '\n---\n');
+        
+        throw error;
+      }
+    }
+
+    // Send completion of chunking stage
+    res.write(JSON.stringify({
+      status: 'processing',
+      stage: 'chunking',
+      phase: 'complete',
+      message: 'Audio file splitting completed',
+      chunkingProgress: 100,
+      transcriptionProgress: 0
+    }) + '\n---\n');
+
+    return { chunkPaths, numChunks };
+  } catch (error) {
+    console.error('Error splitting audio file:', error);
+    throw error;
+  }
+}
+
+async function transcribeAudioChunk(chunkPath, chunkIndex, totalChunks, res) {
+  try {
+    console.log(`Starting transcription of chunk ${chunkIndex + 1}/${totalChunks}`);
+    
+    // Send chunk transcription start progress
+    res.write(JSON.stringify({
+      status: 'processing',
+      stage: 'transcribing',
+      phase: 'processing',
+      message: `Starting transcription of chunk ${chunkIndex + 1}/${totalChunks}`,
+      chunkingProgress: 100,
+      transcriptionProgress: (chunkIndex / totalChunks) * 100
+    }) + '\n---\n');
+
+    // Verify the chunk file exists and has content
+    if (!fs.existsSync(chunkPath)) {
+      throw new Error(`Chunk file ${chunkIndex + 1} not found at ${chunkPath}`);
+    }
+
+    const stats = fs.statSync(chunkPath);
+    console.log(`Chunk ${chunkIndex + 1} size: ${(stats.size / (1024 * 1024)).toFixed(2)} MB`);
+
+    const audioFile = fs.createReadStream(chunkPath);
+    console.log(`Created read stream for chunk ${chunkIndex + 1}`);
+
+    console.log(`Sending chunk ${chunkIndex + 1} to OpenAI API...`);
+    const transcription = await openai.audio.transcriptions.create({
+      file: audioFile,
+      model: "whisper-1",
+      response_format: "verbose_json",
+      timestamp_granularities: ["word", "segment"]
+    }).catch(error => {
+      console.error(`OpenAI API error for chunk ${chunkIndex + 1}:`, error.message);
+      if (error.response) {
+        console.error('API Response:', error.response.data);
+      }
+      throw error;
+    });
+
+    console.log(`Received transcription for chunk ${chunkIndex + 1}`);
+    console.log('Sample of transcription data:', JSON.stringify(transcription.segments[0], null, 2));
+
+    // Calculate time offset for this chunk
+    const timeOffset = chunkIndex * CHUNK_DURATION;
+
+    // Process segments and words
+    const processedSegments = transcription.segments.map(segment => {
+      // Adjust segment timestamps
+      const startTime = segment.start + timeOffset;
+      const endTime = segment.end + timeOffset;
+
+      // Process words if available in the segment
+      let segmentWords = [];
+      if (segment.words && Array.isArray(segment.words)) {
+        segmentWords = segment.words.map(word => ({
+          text: word.text || word.word || "",
+          start: (word.start || word.timestamp) + timeOffset,
+          end: (word.end || (word.timestamp + (word.duration || 0))) + timeOffset
+        }));
+      } else if (transcription.words) {
+        // Filter global words array for this segment's time range
+        segmentWords = transcription.words
+          .filter(word => {
+            const wordStart = (word.start || word.timestamp || 0) + timeOffset;
+            return wordStart >= startTime && wordStart < endTime;
+          })
+          .map(word => ({
+            text: word.text || word.word || "",
+            start: (word.start || word.timestamp) + timeOffset,
+            end: (word.end || (word.timestamp + (word.duration || 0))) + timeOffset
+          }));
+      }
+
+      // If still no words, split the text
+      if (segmentWords.length === 0) {
+        const wordTexts = segment.text.trim().split(/\s+/);
+        const wordDuration = (endTime - startTime) / wordTexts.length;
+        
+        segmentWords = wordTexts.map((text, i) => ({
+          text: text,
+          start: startTime + (i * wordDuration),
+          end: startTime + ((i + 1) * wordDuration)
+        }));
+      }
+
+      return {
+        startTime,
+        endTime,
+        text: segment.text.trim(),
+        words: segmentWords
+      };
+    });
+
+    console.log(`Processed segments for chunk ${chunkIndex + 1}: ${processedSegments.length} segments`);
+    console.log('Sample processed segment:', JSON.stringify(processedSegments[0], null, 2));
+
+    // Send chunk completion progress
+    res.write(JSON.stringify({
+      status: 'processing',
+      stage: 'transcribing',
+      phase: 'processing',
+      message: `Completed chunk ${chunkIndex + 1}/${totalChunks}`,
+      chunkingProgress: 100,
+      transcriptionProgress: ((chunkIndex + 1) / totalChunks) * 100,
+      segments: processedSegments
+    }) + '\n---\n');
+
+    return processedSegments;
+  } catch (error) {
+    console.error(`Error transcribing chunk ${chunkIndex + 1}:`, error);
+    res.write(JSON.stringify({
+      status: 'error',
+      stage: 'transcribing',
+      phase: 'error',
+      message: `Error transcribing chunk ${chunkIndex + 1}: ${error.message}`,
+      chunkingProgress: 100,
+      transcriptionProgress: (chunkIndex / totalChunks) * 100,
+      error: error.message
+    }) + '\n---\n');
+    throw error;
+  }
+}
 
 // Routes
 app.get('/demo-data', (req, res) => {
@@ -52,7 +325,7 @@ app.get('/demo-data', (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
     
     res.json({
-      audioUrl: `${baseUrl}/demo/demo-audio.mp4`, // Full URL to the demo audio file
+      audioUrl: `${baseUrl}/demo/demo-audio.mp4`,
       transcription: transcription
     });
   } catch (error) {
@@ -62,39 +335,129 @@ app.get('/demo-data', (req, res) => {
 });
 
 app.post('/transcribe', upload.single('audio'), async (req, res) => {
+  let tempFilePath = null;
+  let chunksDir = null;
+
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(req.file.path),
-      model: "whisper-1",
-      response_format: "verbose_json",
-      timestamp_granularities: ["segment"]
-    });
+    // Set response headers for streaming
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
 
-    // Clean up the uploaded file
-    fs.unlinkSync(req.file.path);
+    // Create a temporary file from the buffer
+    tempFilePath = path.join(__dirname, `temp-${Date.now()}${path.extname(req.file.originalname)}`);
+    fs.writeFileSync(tempFilePath, req.file.buffer);
 
-    // Format the response to match our expected structure
-    const formattedSegments = transcription.segments.map(segment => ({
-      startTime: segment.start,
-      endTime: segment.end,
-      text: segment.text.trim()
-    }));
+    const fileSizeInMB = req.file.size / (1024 * 1024);
+    console.log(`Processing file of size: ${fileSizeInMB.toFixed(2)} MB`);
 
-    res.json({ segments: formattedSegments });
+    // Send initial progress update
+    res.write(JSON.stringify({ 
+      status: 'processing',
+      stage: 'initializing',
+      phase: 'starting',
+      message: 'Starting transcription process...',
+      chunkingProgress: 0,
+      transcriptionProgress: 0
+    }) + '\n---\n');
+
+    let allSegments = [];
+
+    if (req.file.size > OPENAI_SIZE_LIMIT) {
+      console.log('File exceeds OpenAI limit, splitting into chunks...');
+      chunksDir = path.join(__dirname, `chunks-${Date.now()}`);
+      
+      const { chunkPaths, numChunks } = await splitAudioFile(tempFilePath, chunksDir, res);
+      console.log(`Split audio into ${numChunks} chunks, starting transcription...`);
+      
+      for (let i = 0; i < chunkPaths.length; i++) {
+        try {
+          console.log(`Processing chunk ${i + 1}/${numChunks}`);
+          const chunkSegments = await transcribeAudioChunk(chunkPaths[i], i, numChunks, res);
+          console.log(`Successfully transcribed chunk ${i + 1}/${numChunks}`);
+          allSegments = allSegments.concat(chunkSegments);
+        } catch (error) {
+          console.error(`Failed to process chunk ${i + 1}/${numChunks}:`, error);
+          throw error;
+        }
+      }
+
+      console.log('All chunks processed, cleaning up...');
+      for (const chunkPath of chunkPaths) {
+        fs.unlinkSync(chunkPath);
+      }
+      fs.rmdirSync(chunksDir);
+    } else {
+      res.write(JSON.stringify({
+        status: 'processing',
+        stage: 'chunking',
+        phase: 'skipped',
+        message: 'File small enough to process directly',
+        chunkingProgress: 100,
+        transcriptionProgress: 0
+      }) + '\n---\n');
+      
+      allSegments = await transcribeAudioChunk(tempFilePath, 0, 1, res);
+    }
+
+    allSegments.sort((a, b) => a.startTime - b.startTime);
+    console.log(`Transcription complete. Total segments: ${allSegments.length}`);
+
+    // Send final transcription
+    res.write(JSON.stringify({ 
+      status: 'complete',
+      stage: 'finished',
+      phase: 'complete',
+      message: 'Transcription completed',
+      chunkingProgress: 100,
+      transcriptionProgress: 100,
+      segments: allSegments
+    }) + '\n---\n');
+    res.end();
+
   } catch (error) {
     console.error('Transcription error:', error);
-    res.status(500).json({ error: 'Transcription failed' });
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      fs.unlinkSync(tempFilePath);
+    }
+    if (chunksDir && fs.existsSync(chunksDir)) {
+      fs.rmdirSync(chunksDir, { recursive: true });
+    }
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        error: 'Transcription failed: ' + error.message,
+        details: error.response?.data || 'No additional details available'
+      });
+    } else {
+      res.write(JSON.stringify({
+        status: 'error',
+        stage: 'error',
+        phase: 'error',
+        message: 'Transcription failed: ' + error.message,
+        error: error.message,
+        details: error.response?.data || 'No additional details available'
+      }) + '\n---\n');
+      res.end();
+    }
   }
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something broke!' });
+  console.error('Error:', err);
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ 
+        error: 'File is too large',
+        details: `Maximum upload size is 500MB. Please use a shorter audio clip or compress the file.`
+      });
+    }
+    return res.status(400).json({ error: `Upload error: ${err.message}` });
+  }
+  res.status(500).json({ error: err.message || 'Something broke!' });
 });
 
 app.listen(port, () => {

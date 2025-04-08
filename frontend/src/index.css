@@ -20,11 +20,11 @@
   }
   
   .search-bar {
-    @apply fixed top-0 left-0 right-0 bg-white border-b p-4 shadow-md z-10;
+    @apply fixed top-0 left-0 right-0 bg-white border-b p-2 shadow-md z-10;
   }
   
   .transcription-container {
-    @apply mt-20 mb-32 p-4 overflow-y-auto max-h-[calc(100vh-200px)] rounded-lg bg-white shadow-sm;
+    @apply mt-4 mb-32 p-4 overflow-y-auto max-h-[calc(100vh-200px)] rounded-lg bg-white shadow-sm;
   }
 }
 

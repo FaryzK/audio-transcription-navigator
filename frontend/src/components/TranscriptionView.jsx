@@ -96,7 +96,7 @@ const TranscriptionView = ({
       <div className="mt-1 text-gray-800 leading-relaxed">
         {segment.words.map((word, index) => (
           <span
-            key={`${word.start}-${index}`}
+            key={`${segment.startTime}-${word.start}-${index}`}
             className={`word-segment ${
               activeWord === word ? 'bg-yellow-300 text-yellow-900' : ''
             } px-0.5 mx-0.5 rounded cursor-pointer transition-colors duration-100 hover:bg-yellow-100`}
